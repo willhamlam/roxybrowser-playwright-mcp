@@ -98,12 +98,15 @@ program
       }
 
       if (options.roxyMode) {
-        const dynamicContextFactory = createDynamicCdpContextFactory(config);
         const factory: mcpServer.ServerBackendFactory = {
           name: 'Playwright w/ RoxyBrowser',
           nameInConfig: 'playwright-roxy',
           version: packageJSON.version,
-          create: () => new BrowserServerBackend(config, dynamicContextFactory)
+          create: () => {
+            // Create a new factory instance for each HTTP session to ensure proper isolation
+            const dynamicContextFactory = createDynamicCdpContextFactory(config);
+            return new BrowserServerBackend(config, dynamicContextFactory);
+          }
         };
         await mcpServer.start(factory, config.server);
         return;
