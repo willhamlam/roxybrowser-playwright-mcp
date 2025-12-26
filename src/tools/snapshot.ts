@@ -15,6 +15,7 @@
  */
 
 import { z } from 'zod';
+import * as playwright from 'playwright';
 
 import { defineTabTool, defineTool } from './tool.js';
 import * as javascript from '../utils/codegen.js';
@@ -38,7 +39,8 @@ const snapshot = defineTool({
 
 export const elementSchema = z.object({
   element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
-  ref: z.string().describe('Exact target element reference from the page snapshot'),
+  ref: z.string().optional().describe('Exact target element reference from the page snapshot (used in ARIA mode)'),
+  mcpId: z.number().optional().describe('Element ID from optimized snapshot (used in optimized mode, alternative to ref)'),
 });
 
 const clickSchema = elementSchema.extend({
@@ -59,16 +61,33 @@ const click = defineTabTool({
   handle: async (tab, params, response) => {
     response.setIncludeSnapshot();
 
-    const locator = await tab.refLocator(params);
+    let locator: playwright.Locator;
+
+    // Optimized mode - use mcpId
+    if (params.mcpId !== undefined) {
+      locator = await tab.getElementByMcpId(params.mcpId);
+      const button = params.button;
+      const buttonAttr = button ? `{ button: '${button}' }` : '';
+      if (params.doubleClick)
+        response.addCode(`await page.locator('[data-mcp-id="${params.mcpId}"]').dblclick(${buttonAttr});`);
+      else
+        response.addCode(`await page.locator('[data-mcp-id="${params.mcpId}"]').click(${buttonAttr});`);
+    }
+    // Legacy mode - use ref
+    else if (params.ref) {
+      locator = await tab.refLocator({ element: params.element, ref: params.ref });
+      const button = params.button;
+      const buttonAttr = button ? `{ button: '${button}' }` : '';
+      if (params.doubleClick)
+        response.addCode(`await page.${await generateLocator(locator)}.dblclick(${buttonAttr});`);
+      else
+        response.addCode(`await page.${await generateLocator(locator)}.click(${buttonAttr});`);
+    }
+    else {
+      throw new Error('Either ref or mcpId must be provided');
+    }
+
     const button = params.button;
-    const buttonAttr = button ? `{ button: '${button}' }` : '';
-
-    if (params.doubleClick)
-      response.addCode(`await page.${await generateLocator(locator)}.dblclick(${buttonAttr});`);
-    else
-      response.addCode(`await page.${await generateLocator(locator)}.click(${buttonAttr});`);
-
-
     await tab.waitForCompletion(async () => {
       if (params.doubleClick)
         await locator.dblclick({ button });
@@ -86,9 +105,11 @@ const drag = defineTabTool({
     description: 'Perform drag and drop between two elements',
     inputSchema: z.object({
       startElement: z.string().describe('Human-readable source element description used to obtain the permission to interact with the element'),
-      startRef: z.string().describe('Exact source element reference from the page snapshot'),
+      startRef: z.string().optional().describe('Exact source element reference from the page snapshot (ARIA mode)'),
+      startMcpId: z.number().optional().describe('Source element ID from optimized snapshot (alternative to startRef)'),
       endElement: z.string().describe('Human-readable target element description used to obtain the permission to interact with the element'),
-      endRef: z.string().describe('Exact target element reference from the page snapshot'),
+      endRef: z.string().optional().describe('Exact target element reference from the page snapshot (ARIA mode)'),
+      endMcpId: z.number().optional().describe('Target element ID from optimized snapshot (alternative to endRef)'),
     }),
     type: 'destructive',
   },
@@ -96,16 +117,30 @@ const drag = defineTabTool({
   handle: async (tab, params, response) => {
     response.setIncludeSnapshot();
 
-    const [startLocator, endLocator] = await tab.refLocators([
-      { ref: params.startRef, element: params.startElement },
-      { ref: params.endRef, element: params.endElement },
-    ]);
+    let startLocator: playwright.Locator;
+    let endLocator: playwright.Locator;
+
+    // Optimized mode - use mcpIds
+    if (params.startMcpId !== undefined && params.endMcpId !== undefined) {
+      startLocator = await tab.getElementByMcpId(params.startMcpId);
+      endLocator = await tab.getElementByMcpId(params.endMcpId);
+      response.addCode(`await page.locator('[data-mcp-id="${params.startMcpId}"]').dragTo(page.locator('[data-mcp-id="${params.endMcpId}"]'));`);
+    }
+    // Legacy mode - use refs
+    else if (params.startRef && params.endRef) {
+      [startLocator, endLocator] = await tab.refLocators([
+        { ref: params.startRef, element: params.startElement },
+        { ref: params.endRef, element: params.endElement },
+      ]);
+      response.addCode(`await page.${await generateLocator(startLocator)}.dragTo(page.${await generateLocator(endLocator)});`);
+    }
+    else {
+      throw new Error('Either both refs or both mcpIds must be provided');
+    }
 
     await tab.waitForCompletion(async () => {
       await startLocator.dragTo(endLocator);
     });
-
-    response.addCode(`await page.${await generateLocator(startLocator)}.dragTo(page.${await generateLocator(endLocator)});`);
   },
 });
 
@@ -122,8 +157,21 @@ const hover = defineTabTool({
   handle: async (tab, params, response) => {
     response.setIncludeSnapshot();
 
-    const locator = await tab.refLocator(params);
-    response.addCode(`await page.${await generateLocator(locator)}.hover();`);
+    let locator: playwright.Locator;
+
+    // Optimized mode - use mcpId
+    if (params.mcpId !== undefined) {
+      locator = await tab.getElementByMcpId(params.mcpId);
+      response.addCode(`await page.locator('[data-mcp-id="${params.mcpId}"]').hover();`);
+    }
+    // Legacy mode - use ref
+    else if (params.ref) {
+      locator = await tab.refLocator({ element: params.element, ref: params.ref });
+      response.addCode(`await page.${await generateLocator(locator)}.hover();`);
+    }
+    else {
+      throw new Error('Either ref or mcpId must be provided');
+    }
 
     await tab.waitForCompletion(async () => {
       await locator.hover();
@@ -148,8 +196,21 @@ const selectOption = defineTabTool({
   handle: async (tab, params, response) => {
     response.setIncludeSnapshot();
 
-    const locator = await tab.refLocator(params);
-    response.addCode(`await page.${await generateLocator(locator)}.selectOption(${javascript.formatObject(params.values)});`);
+    let locator: playwright.Locator;
+
+    // Optimized mode - use mcpId
+    if (params.mcpId !== undefined) {
+      locator = await tab.getElementByMcpId(params.mcpId);
+      response.addCode(`await page.locator('[data-mcp-id="${params.mcpId}"]').selectOption(${javascript.formatObject(params.values)});`);
+    }
+    // Legacy mode - use ref
+    else if (params.ref) {
+      locator = await tab.refLocator({ element: params.element, ref: params.ref });
+      response.addCode(`await page.${await generateLocator(locator)}.selectOption(${javascript.formatObject(params.values)});`);
+    }
+    else {
+      throw new Error('Either ref or mcpId must be provided');
+    }
 
     await tab.waitForCompletion(async () => {
       await locator.selectOption(params.values);

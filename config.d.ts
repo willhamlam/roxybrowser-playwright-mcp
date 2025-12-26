@@ -116,4 +116,29 @@ export type Config = {
    * Whether to send image responses to the client. Can be "allow", "omit", or "auto". Defaults to "auto", which sends images if the client can display them.
    */
   imageResponses?: 'allow' | 'omit';
+
+  /**
+   * Snapshot optimization mode. Controls how page content is captured.
+   * - 'aria': Use Playwright's built-in ARIA snapshot (default, compatible but verbose)
+   * - 'optimized': Use DOM distillation with ID mapping (recommended, ~99% token reduction)
+   * - 'auto': Use optimized mode, fall back to ARIA on error (recommended)
+   */
+  snapshotMode?: 'aria' | 'optimized' | 'auto';
+
+  /**
+   * Snapshot optimization options (only applies when snapshotMode is 'optimized' or 'auto')
+   */
+  snapshotOptions?: {
+    /** Include elements within this many pixels above/below viewport (default: 1000) */
+    viewportBuffer?: number;
+
+    /** Maximum text length per element (default: 100) */
+    maxTextLength?: number;
+
+    /** Include hidden elements - useful for debugging (default: false) */
+    includeHidden?: boolean;
+
+    /** Minimum element size in pixels to include (default: 1x1) */
+    minElementSize?: { width: number; height: number };
+  };
 };

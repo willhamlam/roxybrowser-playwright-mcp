@@ -16,7 +16,7 @@
 
 import { renderModalStates } from './tab.js';
 
-import type { Tab, TabSnapshot } from './tab.js';
+import type { Tab, TabSnapshot, OptimizedSnapshot } from './tab.js';
 import type { ImageContent, TextContent } from '@modelcontextprotocol/sdk/types.js';
 import type { Context } from './context.js';
 
@@ -27,7 +27,7 @@ export class Response {
   private _context: Context;
   private _includeSnapshot = false;
   private _includeTabs = false;
-  private _tabSnapshot: TabSnapshot | undefined;
+  private _tabSnapshot: TabSnapshot | OptimizedSnapshot | undefined;
 
   readonly toolName: string;
   readonly toolArgs: Record<string, any>;
@@ -89,7 +89,7 @@ export class Response {
       await tab.updateTitle();
   }
 
-  tabSnapshot(): TabSnapshot | undefined {
+  tabSnapshot(): TabSnapshot | OptimizedSnapshot | undefined {
     return this._tabSnapshot;
   }
 
@@ -121,7 +121,11 @@ ${this._code.join('\n')}
       response.push(...renderModalStates(this._context, this._tabSnapshot.modalStates));
       response.push('');
     } else if (this._tabSnapshot) {
-      response.push(renderTabSnapshot(this._tabSnapshot));
+      if (this._tabSnapshot.mode === 'optimized') {
+        response.push(renderOptimizedSnapshot(this._tabSnapshot as OptimizedSnapshot));
+      } else {
+        response.push(renderTabSnapshot(this._tabSnapshot as TabSnapshot));
+      }
       response.push('');
     }
 
@@ -168,6 +172,45 @@ function renderTabSnapshot(tabSnapshot: TabSnapshot): string {
   lines.push('```yaml');
   lines.push(tabSnapshot.ariaSnapshot);
   lines.push('```');
+
+  return lines.join('\n');
+}
+
+function renderOptimizedSnapshot(snapshot: OptimizedSnapshot): string {
+  const lines: string[] = [];
+
+  // Show token savings metric
+  lines.push(`### Page State (Optimized - ${snapshot.visibleCount}/${snapshot.elementCount} elements)`);
+  lines.push(`- Page URL: ${snapshot.url}`);
+  lines.push(`- Page Title: ${snapshot.title}`);
+  lines.push('');
+
+  // Show distilled content
+  lines.push('### Interactive Elements:');
+  lines.push('```html');
+  lines.push(snapshot.distilledContent);
+  lines.push('```');
+
+  // Include console messages if any (truncated)
+  if (snapshot.consoleMessages.length) {
+    lines.push('');
+    lines.push('### Console Messages:');
+    snapshot.consoleMessages.forEach(msg => {
+      lines.push(`- ${trim(msg.toString(), 100)}`);
+    });
+  }
+
+  // Include downloads if any
+  if (snapshot.downloads.length) {
+    lines.push('');
+    lines.push('### Downloads:');
+    for (const entry of snapshot.downloads) {
+      if (entry.finished)
+        lines.push(`- Downloaded file ${entry.download.suggestedFilename()} to ${entry.outputFile}`);
+      else
+        lines.push(`- Downloading file ${entry.download.suggestedFilename()} ...`);
+    }
+  }
 
   return lines.join('\n');
 }

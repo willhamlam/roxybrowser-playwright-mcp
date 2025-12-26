@@ -20,6 +20,7 @@ import { callOnPageNoTrace, waitForCompletion } from './tools/utils.js';
 import { logUnhandledError } from './utils/log.js';
 import { ManualPromise } from './utils/manualPromise.js';
 import { ModalState } from './tools/tool.js';
+import { captureOptimizedSnapshot, getSnapshotOptionsFromConfig } from './domOptimizer.js';
 
 import type { Context } from './context.js';
 
@@ -39,6 +40,19 @@ export type TabSnapshot = {
   url: string;
   title: string;
   ariaSnapshot: string;
+  modalStates: ModalState[];
+  consoleMessages: ConsoleMessage[];
+  downloads: { download: playwright.Download, finished: boolean, outputFile: string }[];
+  mode?: 'aria';
+};
+
+export type OptimizedSnapshot = {
+  url: string;
+  title: string;
+  distilledContent: string;
+  elementCount: number;
+  visibleCount: number;
+  mode: 'optimized';
   modalStates: ModalState[];
   consoleMessages: ConsoleMessage[];
   downloads: { download: playwright.Download, finished: boolean, outputFile: string }[];
@@ -192,7 +206,21 @@ export class Tab extends EventEmitter<TabEventsInterface> {
     return this._requests;
   }
 
-  async captureSnapshot(): Promise<TabSnapshot> {
+  async captureSnapshot(): Promise<TabSnapshot | OptimizedSnapshot> {
+    const mode = this.context.config.snapshotMode || 'auto';
+
+    // Try optimized mode
+    if (mode === 'optimized' || mode === 'auto') {
+      try {
+        return await this.captureOptimizedSnapshot();
+      } catch (error) {
+        if (mode === 'optimized') throw error;
+        // Fall back to ARIA for 'auto' mode
+        console.warn('Optimized snapshot failed, falling back to ARIA:', error);
+      }
+    }
+
+    // ARIA snapshot mode (original behavior)
     let tabSnapshot: TabSnapshot | undefined;
     const modalStates = await this._raceAgainstModalStates(async () => {
       const snapshot = await (this.page as PageEx)._snapshotForAI();
@@ -203,6 +231,7 @@ export class Tab extends EventEmitter<TabEventsInterface> {
         modalStates: [],
         consoleMessages: [],
         downloads: this._downloads,
+        mode: 'aria',
       };
     });
     if (tabSnapshot) {
@@ -217,7 +246,53 @@ export class Tab extends EventEmitter<TabEventsInterface> {
       modalStates,
       consoleMessages: [],
       downloads: [],
+      mode: 'aria',
     };
+  }
+
+  async captureOptimizedSnapshot(): Promise<OptimizedSnapshot> {
+    let optimizedSnapshot: OptimizedSnapshot | undefined;
+    const modalStates = await this._raceAgainstModalStates(async () => {
+      // Use domOptimizer module
+      const result = await captureOptimizedSnapshot(
+        this.page,
+        getSnapshotOptionsFromConfig(this.context.config)
+      );
+
+      optimizedSnapshot = {
+        url: this.page.url(),
+        title: await this.page.title(),
+        distilledContent: result.distilledHTML,
+        elementCount: result.totalElements,
+        visibleCount: result.visibleElements,
+        mode: 'optimized' as const,
+        modalStates: [],
+        consoleMessages: [],
+        downloads: this._downloads,
+      };
+    });
+
+    if (optimizedSnapshot) {
+      // Assign console message late so that we did not lose any to modal state.
+      optimizedSnapshot.consoleMessages = this._recentConsoleMessages;
+      this._recentConsoleMessages = [];
+    }
+
+    return optimizedSnapshot ?? {
+      url: this.page.url(),
+      title: '',
+      distilledContent: '',
+      elementCount: 0,
+      visibleCount: 0,
+      mode: 'optimized' as const,
+      modalStates,
+      consoleMessages: [],
+      downloads: [],
+    };
+  }
+
+  async getElementByMcpId(mcpId: number): Promise<playwright.Locator> {
+    return this.page.locator(`[data-mcp-id="${mcpId}"]`);
   }
 
   private _javaScriptBlocked(): boolean {

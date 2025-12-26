@@ -15,6 +15,7 @@
  */
 
 import { z } from 'zod';
+import * as playwright from 'playwright';
 
 import { defineTabTool } from './tool.js';
 import { elementSchema } from './snapshot.js';
@@ -62,21 +63,45 @@ const type = defineTabTool({
   },
 
   handle: async (tab, params, response) => {
-    const locator = await tab.refLocator(params);
+    let locator: playwright.Locator;
+
+    // Optimized mode - use mcpId
+    if (params.mcpId !== undefined) {
+      locator = await tab.getElementByMcpId(params.mcpId);
+    }
+    // Legacy mode - use ref
+    else if (params.ref) {
+      locator = await tab.refLocator({ element: params.element, ref: params.ref });
+    }
+    else {
+      throw new Error('Either ref or mcpId must be provided');
+    }
 
     await tab.waitForCompletion(async () => {
       if (params.slowly) {
         response.setIncludeSnapshot();
-        response.addCode(`await page.${await generateLocator(locator)}.pressSequentially(${javascript.quote(params.text)});`);
+        if (params.mcpId !== undefined) {
+          response.addCode(`await page.locator('[data-mcp-id="${params.mcpId}"]').pressSequentially(${javascript.quote(params.text)});`);
+        } else {
+          response.addCode(`await page.${await generateLocator(locator)}.pressSequentially(${javascript.quote(params.text)});`);
+        }
         await locator.pressSequentially(params.text);
       } else {
-        response.addCode(`await page.${await generateLocator(locator)}.fill(${javascript.quote(params.text)});`);
+        if (params.mcpId !== undefined) {
+          response.addCode(`await page.locator('[data-mcp-id="${params.mcpId}"]').fill(${javascript.quote(params.text)});`);
+        } else {
+          response.addCode(`await page.${await generateLocator(locator)}.fill(${javascript.quote(params.text)});`);
+        }
         await locator.fill(params.text);
       }
 
       if (params.submit) {
         response.setIncludeSnapshot();
-        response.addCode(`await page.${await generateLocator(locator)}.press('Enter');`);
+        if (params.mcpId !== undefined) {
+          response.addCode(`await page.locator('[data-mcp-id="${params.mcpId}"]').press('Enter');`);
+        } else {
+          response.addCode(`await page.${await generateLocator(locator)}.press('Enter');`);
+        }
         await locator.press('Enter');
       }
     });

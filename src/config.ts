@@ -45,6 +45,7 @@ export type CLIOptions = {
   proxyServer?: string;
   saveSession?: boolean;
   saveTrace?: boolean;
+  snapshotMode?: 'aria' | 'optimized' | 'auto';
   storageState?: string;
   userAgent?: string;
   userDataDir?: string;
@@ -69,6 +70,13 @@ const defaultConfig: FullConfig = {
   },
   server: {},
   saveTrace: false,
+  snapshotMode: 'auto',
+  snapshotOptions: {
+    viewportBuffer: 1000,
+    maxTextLength: 100,
+    includeHidden: false,
+    minElementSize: { width: 1, height: 1 },
+  },
 };
 
 type BrowserUserConfig = NonNullable<Config['browser']>;
@@ -192,6 +200,7 @@ export function configFromCLIOptions(cliOptions: CLIOptions): Config {
     saveTrace: cliOptions.saveTrace,
     outputDir: cliOptions.outputDir,
     imageResponses: cliOptions.imageResponses,
+    snapshotMode: cliOptions.snapshotMode,
   };
 
   return result;
@@ -214,6 +223,8 @@ function configFromEnv(): Config {
   options.isolated = envToBoolean(process.env.PLAYWRIGHT_MCP_ISOLATED);
   if (process.env.PLAYWRIGHT_MCP_IMAGE_RESPONSES === 'omit')
     options.imageResponses = 'omit';
+  if (process.env.PLAYWRIGHT_MCP_SNAPSHOT_MODE && ['aria', 'optimized', 'auto'].includes(process.env.PLAYWRIGHT_MCP_SNAPSHOT_MODE))
+    options.snapshotMode = process.env.PLAYWRIGHT_MCP_SNAPSHOT_MODE as 'aria' | 'optimized' | 'auto';
   options.sandbox = envToBoolean(process.env.PLAYWRIGHT_MCP_SANDBOX);
   options.outputDir = envToString(process.env.PLAYWRIGHT_MCP_OUTPUT_DIR);
   options.port = envToNumber(process.env.PLAYWRIGHT_MCP_PORT);

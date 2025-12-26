@@ -23,7 +23,7 @@ import { outputFile  } from './config.js';
 
 import type { FullConfig } from './config.js';
 import type * as actions from './actions.js';
-import type { Tab, TabSnapshot } from './tab.js';
+import type { Tab, TabSnapshot, OptimizedSnapshot } from './tab.js';
 
 type LogEntry = {
   timestamp: number;
@@ -35,7 +35,7 @@ type LogEntry = {
   };
   userAction?: actions.Action;
   code: string;
-  tabSnapshot?: TabSnapshot;
+  tabSnapshot?: TabSnapshot | OptimizedSnapshot;
 };
 
 export class SessionLog {
@@ -163,9 +163,15 @@ export class SessionLog {
       }
 
       if (entry.tabSnapshot) {
-        const fileName = `${ordinal}.snapshot.yml`;
-        fs.promises.writeFile(path.join(this._folder, fileName), entry.tabSnapshot.ariaSnapshot).catch(logUnhandledError);
-        lines.push(`- Snapshot: ${fileName}`);
+        if (entry.tabSnapshot.mode === 'optimized') {
+          const fileName = `${ordinal}.snapshot.html`;
+          fs.promises.writeFile(path.join(this._folder, fileName), entry.tabSnapshot.distilledContent).catch(logUnhandledError);
+          lines.push(`- Snapshot: ${fileName} (optimized - ${entry.tabSnapshot.visibleCount}/${entry.tabSnapshot.elementCount} elements)`);
+        } else {
+          const fileName = `${ordinal}.snapshot.yml`;
+          fs.promises.writeFile(path.join(this._folder, fileName), entry.tabSnapshot.ariaSnapshot).catch(logUnhandledError);
+          lines.push(`- Snapshot: ${fileName}`);
+        }
       }
 
       lines.push('', '');
